@@ -22,6 +22,8 @@ extern crate clap;
 extern crate serde_derive;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate crossbeam_channel;
 
 use clap::{App, Arg};
 

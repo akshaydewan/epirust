@@ -48,9 +48,8 @@ use futures::join;
 use crate::listeners::travel_counter::TravelCounter;
 use crate::listeners::intervention_reporter::InterventionReporter;
 use rayon::prelude::*;
-use std::sync::mpsc;
-use std::sync::mpsc::{Sender, Receiver};
 use crate::agent::Citizen;
+use crossbeam_channel::{Sender, Receiver};
 
 pub struct Epidemiology {
     pub agent_location_map: allocation_map::AgentLocationMap,
@@ -364,7 +363,7 @@ impl Epidemiology {
                 rng: &mut RandomWrapper, disease: &Disease, percent_outgoing: f64,
                 outgoing: &mut Vec<(Point, Traveller)>, publish_citizen_state: bool) {
         write_buffer.clear();
-        let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = mpsc::channel();
+        let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = crossbeam_channel::unbounded();
         let hr = csv_record.get_hour();
 
         read_buffer.get_map().par_iter().for_each_with(tx, |tx, (cell, agent)| {
