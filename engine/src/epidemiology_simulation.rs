@@ -47,6 +47,10 @@ use crate::travel_plan::{EngineTravelPlan, TravellersByRegion, Traveller};
 use futures::join;
 use crate::listeners::travel_counter::TravelCounter;
 use crate::listeners::intervention_reporter::InterventionReporter;
+use rayon::prelude::*;
+use std::sync::mpsc;
+use std::sync::mpsc::{Sender, Receiver};
+use crate::agent::Citizen;
 
 pub struct Epidemiology {
     pub agent_location_map: allocation_map::AgentLocationMap,
@@ -355,25 +359,35 @@ impl Epidemiology {
         }
     }
 
-    fn simulate(mut csv_record: &mut Counts, simulation_hour: i32, read_buffer: &AgentLocationMap,
+    fn simulate(csv_record: &mut Counts, simulation_hour: i32, read_buffer: &AgentLocationMap,
                 write_buffer: &mut AgentLocationMap, grid: &Grid, listeners: &mut Listeners,
                 rng: &mut RandomWrapper, disease: &Disease, percent_outgoing: f64,
                 outgoing: &mut Vec<(Point, Traveller)>, publish_citizen_state: bool) {
         write_buffer.clear();
-        for (cell, agent) in read_buffer.iter() {
-            let mut current_agent = *agent;
-            let infection_status = current_agent.state_machine.is_infected();
-            let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, &mut csv_record, rng, disease);
+        let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = mpsc::channel();
+        let hr = csv_record.get_hour();
 
-            if infection_status == false && current_agent.state_machine.is_infected() == true {
-                listeners.citizen_got_infected(&cell);
-            }
+        read_buffer.get_map().par_iter().for_each_with(tx, |tx, (cell, agent)| {
+            let mut rng = RandomWrapper::new();
+            let mut current_agent = *agent;
+            let mut counts = Counts::new_for_hr(hr);
+            let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, &mut counts, &mut rng, disease);
+            tx.send((point, *cell, current_agent, counts)).unwrap();
+        });
+
+        for (point, old_point, current_agent, counts) in rx {
+            //TODO which point should the hotspot tracker use if the citizen doesn't move from the location?
+            // let infection_status = current_agent.state_machine.is_infected();
+            // if infection_status == false && current_agent.state_machine.is_infected() == true {
+            //     listeners.citizen_got_infected(&old_point);
+            // }
 
             let agent_option = write_buffer.get(&point);
             let new_location = match agent_option {
-                Some(mut _agent) => cell, //occupied
+                Some(mut _agent) => &old_point, //occupied
                 _ => &point
             };
+            write_buffer.insert(*new_location, current_agent);
 
             if simulation_hour % 24 == 0 && current_agent.can_move()
                 && rng.get().gen_bool(percent_outgoing) {
@@ -381,10 +395,10 @@ impl Epidemiology {
                 outgoing.push((*new_location, traveller));
             }
 
-            write_buffer.insert(*new_location, current_agent);
             if publish_citizen_state {
                 listeners.citizen_state_updated(simulation_hour, &current_agent, new_location);
             }
+            csv_record.reduce(&counts);
         }
     }
 

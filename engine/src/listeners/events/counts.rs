@@ -38,6 +38,10 @@ impl Counts {
         Counts { hour: 0, susceptible, exposed, infected: 0, quarantined: 0, recovered: 0, deceased: 0 }
     }
 
+    pub fn new_for_hr(hr: i32) -> Counts {
+        Counts { hour: hr, susceptible: 0, exposed: 0, infected: 0, quarantined: 0, recovered: 0, deceased: 0 }
+    }
+
     pub fn get_susceptible(&self) -> i32 {
         self.susceptible
     }
@@ -92,6 +96,15 @@ impl Counts {
 
     pub fn increment_hour(&mut self) {
         self.hour += 1;
+    }
+
+    pub fn reduce(&mut self, other: &Counts) {
+        self.susceptible += other.susceptible;
+        self.exposed += other.exposed;
+        self.infected += other.infected;
+        self.quarantined += other.quarantined;
+        self.recovered += other.recovered;
+        self.deceased += other.deceased;
     }
 }
 

@@ -26,8 +26,11 @@ use crate::agent::Citizen;
 use crate::disease_state_machine::State;
 use crate::listeners::events::counts::Counts;
 use crate::travel_plan::Traveller;
-use std::collections::hash_map::{IterMut, Iter};
+use std::collections::hash_map::{IterMut, Iter, IntoIter};
 use fnv::FnvHashMap;
+use rayon::prelude::*;
+use rayon::iter::IterBridge;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct AgentLocationMap {
@@ -38,6 +41,11 @@ pub struct AgentLocationMap {
 impl AgentLocationMap {
     pub fn init_with_capacity(&mut self, size: usize) {
         self.agent_cell = FnvHashMap::with_capacity_and_hasher(size, Default::default());
+    }
+
+    //temporary
+    pub fn get_map(&self) -> &FnvHashMap<Point, agent::Citizen> {
+        &self.agent_cell
     }
 
     pub fn new(grid_size: i32, agent_list: &[agent::Citizen], points: &[Point]) -> AgentLocationMap {
