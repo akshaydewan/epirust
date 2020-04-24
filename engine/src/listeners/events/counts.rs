@@ -17,6 +17,8 @@
  *
  */
 
+use std::ops::Add;
+
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub struct Counts {
     hour: i32,
@@ -98,7 +100,7 @@ impl Counts {
         self.hour += 1;
     }
 
-    pub fn reduce(&mut self, other: &Counts) {
+    pub fn reduce_mut(&mut self, other: &Counts) {
         self.susceptible += other.susceptible;
         self.exposed += other.exposed;
         self.infected += other.infected;
@@ -106,8 +108,35 @@ impl Counts {
         self.recovered += other.recovered;
         self.deceased += other.deceased;
     }
+
+    pub fn population(&self) -> i32 {
+        self.susceptible +
+            self.exposed +
+            self.infected +
+            self.quarantined +
+            self.recovered +
+            self.deceased
+    }
 }
 
+impl Add for Counts {
+    type Output = Counts;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        if self.hour != rhs.hour {
+            panic!("Cannot add counts for different hours!");
+        }
+        Counts {
+            hour: self.hour,
+            susceptible: self.susceptible + rhs.susceptible,
+            exposed: self.exposed + rhs.exposed,
+            infected: self.infected + rhs.exposed,
+            quarantined: self.quarantined + rhs.quarantined,
+            recovered: self.recovered + rhs.recovered,
+            deceased: self.deceased + rhs.deceased
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

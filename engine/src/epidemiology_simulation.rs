@@ -50,6 +50,7 @@ use crate::listeners::intervention_reporter::InterventionReporter;
 use rayon::prelude::*;
 use crate::agent::Citizen;
 use crossbeam_channel::{Sender, Receiver};
+use std::sync::{RwLock, Mutex};
 
 pub struct Epidemiology {
     pub agent_location_map: allocation_map::AgentLocationMap,
@@ -351,7 +352,8 @@ impl Epidemiology {
     }
 
     fn vaccinate(vaccination_percentage: f64, write_buffer_reference: &mut AgentLocationMap, rng: &mut RandomWrapper) {
-        for (_v, agent) in write_buffer_reference.iter_mut() {
+        for mut entry in write_buffer_reference.get_map().iter_mut() {
+            let agent = entry.value_mut();
             if agent.state_machine.is_susceptible() && rng.get().gen_bool(vaccination_percentage) {
                 agent.set_vaccination(true);
             }
@@ -359,51 +361,64 @@ impl Epidemiology {
     }
 
     fn simulate(csv_record: &mut Counts, simulation_hour: i32, read_buffer: &AgentLocationMap,
-                write_buffer: &mut AgentLocationMap, grid: &Grid, listeners: &mut Listeners,
+                write_buffer: &AgentLocationMap, grid: &Grid, listeners: &mut Listeners,
                 rng: &mut RandomWrapper, disease: &Disease, percent_outgoing: f64,
                 outgoing: &mut Vec<(Point, Traveller)>, publish_citizen_state: bool) {
         write_buffer.clear();
-        let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = crossbeam_channel::unbounded();
+        // let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = crossbeam_channel::unbounded();
         let hr = csv_record.get_hour();
+        let counts_zero = Counts::new_for_hr(csv_record.get_hour());
+        let mutex = Mutex::new(write_buffer);
 
-        read_buffer.get_map().par_iter().for_each_with(tx, |tx, (cell, agent)| {
+        let counts_for_hr = read_buffer.get_map().iter().par_bridge().map(|entry| {
+            let cell = entry.key();
+            let agent = entry.value();
             let mut rng = RandomWrapper::new();
             let mut current_agent = *agent;
-            let mut counts = Counts::new_for_hr(hr);
-            let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, &mut counts, &mut rng, disease);
-            tx.send((point, *cell, current_agent, counts)).unwrap();
-        });
+            let mut counts_diff = Counts::new_for_hr(hr);
+            let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, &mut counts_diff, &mut rng, disease);
 
-        for (point, old_point, current_agent, counts) in rx {
-            //TODO which point should the hotspot tracker use if the citizen doesn't move from the location?
-            // let infection_status = current_agent.state_machine.is_infected();
-            // if infection_status == false && current_agent.state_machine.is_infected() == true {
-            //     listeners.citizen_got_infected(&old_point);
-            // }
-
-            let agent_option = write_buffer.get(&point);
+            let write_buffer_mutex = mutex.lock().unwrap();
+            let agent_option = write_buffer_mutex.get(&point);
             let new_location = match agent_option {
-                Some(mut _agent) => &old_point, //occupied
+                Some(mut _agent) => cell, //occupied
                 _ => &point
             };
-            write_buffer.insert(*new_location, current_agent);
+            write_buffer_mutex.insert(*new_location, current_agent);
+            counts_diff
+        }).reduce(|| counts_zero,
+                  |a, b| a + b);
 
-            if simulation_hour % 24 == 0 && current_agent.can_move()
-                && rng.get().gen_bool(percent_outgoing) {
-                let traveller = Traveller::from(&current_agent);
-                outgoing.push((*new_location, traveller));
-            }
+        println!("counts population {}", counts_for_hr.population());
 
-            if publish_citizen_state {
-                listeners.citizen_state_updated(simulation_hour, &current_agent, new_location);
-            }
-            csv_record.reduce(&counts);
-        }
+        csv_record.reduce_mut(&counts_for_hr);
+
+        // for (point, old_point, current_agent, counts) in rx {
+        //     //TODO which point should the hotspot tracker use if the citizen doesn't move from the location?
+        //     // let infection_status = current_agent.state_machine.is_infected();
+        //     // if infection_status == false && current_agent.state_machine.is_infected() == true {
+        //     //     listeners.citizen_got_infected(&old_point);
+        //     // }
+        //
+        //
+        //
+        //     if simulation_hour % 24 == 0 && current_agent.can_move()
+        //         && rng.get().gen_bool(percent_outgoing) {
+        //         let traveller = Traveller::from(&current_agent);
+        //         outgoing.push((*new_location, traveller));
+        //     }
+        //
+        //     if publish_citizen_state {
+        //         listeners.citizen_state_updated(simulation_hour, &current_agent, new_location);
+        //     }
+        //
+        // }
     }
 
     fn lock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap, rng: &mut RandomWrapper, lockdown_details: &LockdownConfig) {
         info!("Locking the city. Hour: {}", hr);
-        for (_v, agent) in write_buffer_reference.iter_mut() {
+        for mut entry in write_buffer_reference.get_map().iter_mut() {
+            let agent = entry.value_mut();
             if rng.get().gen_bool(1.0 - lockdown_details.essential_workers_population) {
                 agent.set_isolation(true);
             }
@@ -412,7 +427,8 @@ impl Epidemiology {
 
     fn unlock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap) {
         info!("Unlocking city. Hour: {}", hr);
-        for (_v, agent) in write_buffer_reference.iter_mut() {
+        for mut entry in write_buffer_reference.get_map().iter_mut() {
+            let agent = entry.value_mut();
             if agent.is_isolated() {
                 agent.set_isolation(false);
             }

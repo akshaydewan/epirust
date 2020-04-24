@@ -26,31 +26,28 @@ use crate::agent::Citizen;
 use crate::disease_state_machine::State;
 use crate::listeners::events::counts::Counts;
 use crate::travel_plan::Traveller;
-use std::collections::hash_map::{IterMut, Iter, IntoIter};
-use fnv::FnvHashMap;
-use rayon::prelude::*;
-use rayon::iter::IterBridge;
-use std::collections::HashMap;
+use dashmap::DashMap;
+use dashmap::mapref::one::Ref;
 
 #[derive(Clone)]
 pub struct AgentLocationMap {
     grid_size: i32,
-    agent_cell: FnvHashMap<Point, agent::Citizen>,
+    agent_cell: DashMap<Point, agent::Citizen>,
 }
 
 impl AgentLocationMap {
     pub fn init_with_capacity(&mut self, size: usize) {
-        self.agent_cell = FnvHashMap::with_capacity_and_hasher(size, Default::default());
+        self.agent_cell = DashMap::with_capacity(size);
     }
 
     //temporary
-    pub fn get_map(&self) -> &FnvHashMap<Point, agent::Citizen> {
+    pub fn get_map(&self) -> &DashMap<Point, agent::Citizen> {
         &self.agent_cell
     }
 
     pub fn new(grid_size: i32, agent_list: &[agent::Citizen], points: &[Point]) -> AgentLocationMap {
         debug!("{} agents and {} starting points", agent_list.len(), points.len());
-        let mut map: FnvHashMap<Point, agent::Citizen> = FnvHashMap::default();
+        let map: DashMap<Point, agent::Citizen> = DashMap::default();
         for i in 0..agent_list.len() {
             map.insert(points[i], agent_list[i]);
         }
@@ -78,7 +75,7 @@ impl AgentLocationMap {
 //        }
 //    }
 
-    pub fn get_agent_for(&self, cell: &Point) -> Option<&agent::Citizen> {
+    pub fn get_agent_for(&self, cell: &Point) -> Option<Ref<Point, Citizen>> {
         self.agent_cell.get(cell)
     }
 
@@ -90,22 +87,22 @@ impl AgentLocationMap {
         !self.agent_cell.contains_key(cell)
     }
 
-    pub fn remove_citizens(&mut self, outgoing: &Vec<(Point, Traveller)>, counts: &mut Counts, grid: &mut Grid) {
+    pub fn remove_citizens(&self, outgoing: &Vec<(Point, Traveller)>, counts: &mut Counts, grid: &mut Grid) {
         debug!("Removing {} outgoing travellers", outgoing.len());
         for (point, traveller) in outgoing {
             match traveller.state_machine.state {
-                State::Susceptible { .. } => { counts.update_susceptible(-1) },
+                State::Susceptible { .. } => { counts.update_susceptible(-1) }
                 State::Exposed { .. } => { counts.update_exposed(-1) }
-                State::Infected { .. } => { counts.update_infected(-1) },
-                State::Recovered { .. } => { counts.update_recovered(-1) },
-                State::Deceased { .. } => { panic!("Deceased agent should not travel!") },
+                State::Infected { .. } => { counts.update_infected(-1) }
+                State::Recovered { .. } => { counts.update_recovered(-1) }
+                State::Deceased { .. } => { panic!("Deceased agent should not travel!") }
             }
             match self.agent_cell.remove(point) {
                 None => {
                     panic!("Trying to remove citizen {:?} from location {:?}, but no citizen is present at this location!",
                            traveller.id, point)
                 }
-                Some(citizen) => {
+                Some((_point, citizen)) => {
                     grid.remove_house_occupant(&citizen.home_location);
                     if citizen.is_working() {
                         grid.remove_office_occupant(&citizen.work_location);
@@ -115,7 +112,7 @@ impl AgentLocationMap {
         }
     }
 
-    pub fn assimilate_citizens(&mut self, incoming: &mut Vec<Traveller>, grid: &mut Grid, counts: &mut Counts,
+    pub fn assimilate_citizens(&self, incoming: &mut Vec<Traveller>, grid: &mut Grid, counts: &mut Counts,
                                rng: &mut RandomWrapper) {
         if incoming.is_empty() {
             return;
@@ -154,7 +151,7 @@ impl AgentLocationMap {
         loop {
             let point = area.get_random_point(rng);
             if !self.agent_cell.contains_key(&point) {
-                return point
+                return point;
             }
         }
     }
@@ -163,23 +160,15 @@ impl AgentLocationMap {
         self.agent_cell.len() as i32
     }
 
-    pub fn iter(&self) -> Iter<'_, Point, Citizen> {
-        self.agent_cell.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> IterMut<'_, Point, Citizen> {
-        self.agent_cell.iter_mut()
-    }
-
-    pub fn clear(&mut self) {
+    pub fn clear(&self) {
         self.agent_cell.clear();
     }
 
-    pub fn get(&self, point: &Point) -> Option<&Citizen> {
+    pub fn get(&self, point: &Point) -> Option<Ref<Point, Citizen>> {
         self.agent_cell.get(point)
     }
 
-    pub fn insert(&mut self, point: Point, citizen: Citizen) -> Option<Citizen> {
+    pub fn insert(&self, point: Point, citizen: Citizen) -> Option<Citizen> {
         self.agent_cell.insert(point, citizen)
     }
 }

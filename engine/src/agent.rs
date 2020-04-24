@@ -306,8 +306,11 @@ impl Citizen {
             let neighbor_that_spreads_infection = neighbours
                 .filter(|p| map.is_point_in_grid(p))
                 .filter_map(|cell| { map.get_agent_for(&cell) })
-                .filter(|agent| (agent.state_machine.is_infected() || agent.is_quarantined()) && !agent.hospitalized)
-                .find(|neighbor| rng.get().gen_bool(neighbor.get_infection_transmission_rate(disease)));
+                .filter(|entry| {
+                    (entry.value().state_machine.is_infected() || entry.value().is_quarantined())
+                        && !entry.value().hospitalized
+                })
+                .find(|neighbor| rng.get().gen_bool(neighbor.value().get_infection_transmission_rate(disease)));
 
             if neighbor_that_spreads_infection.is_some() {
                 self.state_machine.expose(counts.get_hour());
