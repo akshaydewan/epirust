@@ -50,7 +50,8 @@ use crate::listeners::intervention_reporter::InterventionReporter;
 use rayon::prelude::*;
 use crate::agent::Citizen;
 use crossbeam_channel::{Sender, Receiver};
-use std::sync::{RwLock, Mutex};
+use std::sync::{RwLock, Mutex, Arc};
+use dashmap::DashMap;
 
 pub struct Epidemiology {
     pub agent_location_map: allocation_map::AgentLocationMap,
@@ -81,7 +82,7 @@ impl Epidemiology {
     fn stop_simulation(run_mode: &RunMode, row: Counts) -> bool {
         let zero_active_cases = row.get_exposed() == 0 && row.get_infected() == 0 && row.get_quarantined() == 0;
         match run_mode {
-            RunMode::MultiEngine { .. } => { false },
+            RunMode::MultiEngine { .. } => { false }
             _ => zero_active_cases
         }
     }
@@ -232,7 +233,7 @@ impl Epidemiology {
                 &mut write_buffer_reference,
                 &mut rng,
                 &mut listeners,
-                simulation_hour
+                simulation_hour,
             );
 
             if Epidemiology::stop_simulation(&run_mode, counts_at_hr) {
@@ -262,7 +263,7 @@ impl Epidemiology {
     async fn receive_tick(run_mode: &RunMode, message_stream: &mut MessageStream<'_, DefaultConsumerContext>,
                           simulation_hour: i32) -> Option<Tick> {
         if simulation_hour > 1 && simulation_hour % 24 != 0 {
-           return None;
+            return None;
         }
         if let RunMode::MultiEngine { engine_id: _e } = run_mode {
             let msg = message_stream.next().await;
@@ -285,7 +286,7 @@ impl Epidemiology {
     async fn send_ack(run_mode: &RunMode, producer: &mut KafkaProducer, counts: Counts, simulation_hour: i32,
                       lockdown: &LockdownIntervention) {
         if simulation_hour > 1 && simulation_hour % 24 != 0 {
-            return
+            return;
         }
         if let RunMode::MultiEngine { engine_id } = run_mode {
             let ack = TickAck {
@@ -317,7 +318,7 @@ impl Epidemiology {
             while expected_incoming_regions != received_incoming_regions {
                 let maybe_msg = Epidemiology::receive_travellers_from_region(message_stream, engine_travel_plan).await;
                 match maybe_msg {
-                    None => {},
+                    None => {}
                     Some(region_incoming) => {
                         incoming.extend(region_incoming.get_travellers());
                         received_incoming_regions += 1;
@@ -368,7 +369,8 @@ impl Epidemiology {
         // let (tx, rx): (Sender<(Point, Point, Citizen, Counts)>, Receiver<(Point, Point, Citizen, Counts)>) = crossbeam_channel::unbounded();
         let hr = csv_record.get_hour();
         let counts_zero = Counts::new_for_hr(csv_record.get_hour());
-        let mutex = Mutex::new(write_buffer);
+        let old_locations = DashMap::new();
+        let displaced_agents = Arc::new(Mutex::new(vec![]));
 
         let counts_for_hr = read_buffer.get_map().iter().par_bridge().map(|entry| {
             let cell = entry.key();
@@ -376,21 +378,29 @@ impl Epidemiology {
             let mut rng = RandomWrapper::new();
             let mut current_agent = *agent;
             let mut counts_diff = Counts::new_for_hr(hr);
+            old_locations.insert(current_agent, *cell);
             let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, &mut counts_diff, &mut rng, disease);
 
-            let write_buffer_mutex = mutex.lock().unwrap();
-            let agent_option = write_buffer_mutex.get(&point);
-            let new_location = match agent_option {
-                Some(mut _agent) => cell, //occupied
-                _ => &point
-            };
-            write_buffer_mutex.insert(*new_location, current_agent);
+            let existing_agent_at_point = write_buffer.insert(point, current_agent);
+            match existing_agent_at_point {
+                None => {} //ok, good. point is unoccupied
+                Some(displaced_agent) => {
+                    let clone = Arc::clone(&displaced_agents);
+                    let mut vec = clone.lock().unwrap();
+                    vec.push(displaced_agent);
+                }
+            }
             counts_diff
         }).reduce(|| counts_zero,
                   |a, b| a + b);
 
-        println!("counts population {}", counts_for_hr.population());
-
+        // println!("counts population {}", counts_for_hr.population());
+        let displaced_agents_unlocked = displaced_agents.lock().unwrap();
+        // println!("{} conflicts", displaced_agents_unlocked.len());
+        displaced_agents_unlocked.iter().for_each(|citizen| {
+            let entry = old_locations.get(citizen).unwrap();
+            write_buffer.insert(*entry.value(), *citizen);
+        });
         csv_record.reduce_mut(&counts_for_hr);
 
         // for (point, old_point, current_agent, counts) in rx {

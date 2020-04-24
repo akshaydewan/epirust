@@ -32,6 +32,7 @@ use crate::listeners::events::counts::Counts;
 use crate::disease_state_machine::DiseaseStateMachine;
 use uuid::Uuid;
 use crate::travel_plan::Traveller;
+use std::hash::{Hash, Hasher};
 
 #[derive(Deserialize)]
 pub struct PopulationRecord {
@@ -373,6 +374,20 @@ impl Citizen {
         map.move_agent(cell, new_cell)
     }
 }
+
+impl Hash for Citizen {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Citizen {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Citizen {}
 
 pub fn citizen_factory(number_of_agents: i32, home_locations: &Vec<Area>, work_locations: &Vec<Area>, public_transport_locations: &Vec<Point>,
                        percentage_public_transport: f64, working_percentage: f64, rng: &mut RandomWrapper) -> Vec<Citizen> {
