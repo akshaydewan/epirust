@@ -57,6 +57,10 @@ impl AgentLocationMap {
         old_cell
     }
 
+    pub fn hospital_has_space(&self, hospital_area: &Area) -> bool {
+        hospital_area.iter().find(|cell| { self.is_cell_vacant(cell) }).is_some()
+    }
+
     pub fn goto_hospital(&self, hospital_area: &Area, cell: Point, citizen: &mut agent::Citizen) -> (bool, Point) {
         let vacant_hospital_cell = hospital_area.iter().find(|cell| {
             self.is_cell_vacant(cell)
@@ -186,7 +190,7 @@ impl AgentLocationMap {
 mod tests {
     use super::*;
     use crate::random_wrapper::RandomWrapper;
-    use crate::agent::WorkStatus;
+    use crate::agent::WorkerType;
 
     fn before_each() -> AgentLocationMap {
         let mut rng = RandomWrapper::new();
@@ -194,10 +198,10 @@ mod tests {
         let home_locations = vec![Area::new(Point::new(0, 0), Point::new(2, 2)), Area::new(Point::new(3, 0), Point::new(4, 2))];
 
         let work_locations = vec![Area::new(Point::new(5, 0), Point::new(6, 2)), Area::new(Point::new(7, 0), Point::new(8, 2))];
-        let work_status = WorkStatus::NA {};
+        let worker_type = WorkerType::Normal;
 
-        let agents = vec![agent::Citizen::new(home_locations[0], work_locations[0], points[0], false, false, work_status, &mut rng),
-                          agent::Citizen::new(home_locations[1], work_locations[0], points[0], true, true, work_status, &mut rng)];
+        let agents = vec![agent::Citizen::new(home_locations[0], work_locations[0], points[0], false, false, worker_type, &mut rng),
+                          agent::Citizen::new(home_locations[1], work_locations[0], points[0], true, true, worker_type, &mut rng)];
         AgentLocationMap::new(5, &agents, &points)
     }
 
@@ -212,7 +216,7 @@ mod tests {
     fn should_goto_hospital() {
         let mut rng = RandomWrapper::new();
         let points = vec![Point { x: 0, y: 1 }, Point { x: 1, y: 0 }];
-        let work_status = WorkStatus::Normal {};
+        let work_status = WorkerType::Normal;
         let home_locations = vec![Area::new(Point::new(0, 0), Point::new(2, 2)), Area::new(Point::new(3, 0), Point::new(4, 2))];
 
         let work_locations = vec![Area::new(Point::new(5, 0), Point::new(6, 2)), Area::new(Point::new(7, 0), Point::new(8, 2))];
@@ -232,7 +236,7 @@ mod tests {
         let mut rng = RandomWrapper::new();
         let points = vec![Point::new(0, 0), Point::new(0, 1), Point::new(1, 0), Point::new(1, 1)];
         let home = Area::new(Point::new(0, 0), Point::new(2, 2));
-        let work_status = WorkStatus::NA {};
+        let work_status = WorkerType::Normal;
 
         let work = Area::new(Point::new(5, 0), Point::new(6, 2));
         let mut citizen1 = agent::Citizen::new(home, work, points[0], false, false, work_status, &mut rng);

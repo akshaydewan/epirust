@@ -173,11 +173,11 @@ impl Epidemiology {
 
         if interventions.lockdown.should_apply(&counts_at_hr) {
             interventions.lockdown.apply();
-            Epidemiology::lock_city(counts_at_hr.get_hour(), write_buffer);
+            // Epidemiology::lock_city(counts_at_hr.get_hour(), write_buffer);
             listeners.intervention_applied(counts_at_hr.get_hour(), &interventions.lockdown)
         }
         if interventions.lockdown.should_unlock(&counts_at_hr) {
-            Epidemiology::unlock_city(counts_at_hr.get_hour(), write_buffer);
+            // Epidemiology::unlock_city(counts_at_hr.get_hour(), write_buffer);
             interventions.lockdown.unapply();
             listeners.intervention_applied(counts_at_hr.get_hour(), &interventions.lockdown)
         }
@@ -242,7 +242,8 @@ impl Epidemiology {
 
             Epidemiology::simulate(counts_at_hr, simulation_hour, read_buffer_reference, write_buffer_reference,
                                    &self.grid, listeners, rng, &self.disease, percent_outgoing,
-                                   &mut outgoing, config.enable_citizen_state_messages());
+                                   &mut outgoing, config.enable_citizen_state_messages(),
+                                   interventions.lockdown.is_locked_down());
 
             listeners.counts_updated(*counts_at_hr);
             Epidemiology::process_interventions(interventions, &counts_at_hr, listeners,
@@ -325,7 +326,8 @@ impl Epidemiology {
             let sim = async {
                 Epidemiology::simulate(counts_at_hr, simulation_hour, read_buffer_reference, write_buffer_reference,
                                        grid, listeners, rng, disease, percent_outgoing,
-                                       &mut outgoing, config.enable_citizen_state_messages());
+                                       &mut outgoing, config.enable_citizen_state_messages(),
+                                       interventions.lockdown.is_locked_down());
                 let outgoing_travellers_by_region = engine_travel_plan.alloc_outgoing_to_regions(&outgoing);
                 if simulation_hour % 24 == 0 {
                     listeners.outgoing_travellers_added(simulation_hour, &outgoing_travellers_by_region);
@@ -468,13 +470,14 @@ impl Epidemiology {
     fn simulate(csv_record: &mut Counts, simulation_hour: i32, read_buffer: &AgentLocationMap,
                 write_buffer: &mut AgentLocationMap, grid: &Grid, listeners: &mut Listeners,
                 rng: &mut RandomWrapper, disease: &Disease, percent_outgoing: f64,
-                outgoing: &mut Vec<(Point, Traveller)>, publish_citizen_state: bool) {
+                outgoing: &mut Vec<(Point, Traveller)>, publish_citizen_state: bool, lockdown: bool) {
         write_buffer.clear();
         csv_record.clear();
         for (cell, agent) in read_buffer.iter() {
             let mut current_agent = *agent;
             let infection_status = current_agent.state_machine.is_infected();
-            let point = current_agent.perform_operation(*cell, simulation_hour, &grid, read_buffer, rng, disease);
+            let point = current_agent.receive_tick(*cell, simulation_hour, &grid, read_buffer,
+                                                   rng, disease, lockdown);
             Epidemiology::update_counts(csv_record, &current_agent);
 
             if infection_status == false && current_agent.state_machine.is_infected() == true {
@@ -487,7 +490,7 @@ impl Epidemiology {
                 _ => &point
             };
 
-            if simulation_hour % 24 == 0 && current_agent.can_move()
+            if simulation_hour % 24 == 0 && current_agent.can_travel(lockdown)
                 && rng.get().gen_bool(percent_outgoing) {
                 let traveller = Traveller::from(&current_agent);
                 outgoing.push((*new_location, traveller));
@@ -517,23 +520,21 @@ impl Epidemiology {
         }
     }
 
-    fn lock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap) {
-        info!("Locking the city. Hour: {}", hr);
-        for (_v, agent) in write_buffer_reference.iter_mut() {
-            if !agent.is_essential_worker() {
-                agent.set_isolation(true);
-            }
-        }
-    }
-
-    fn unlock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap) {
-        info!("Unlocking city. Hour: {}", hr);
-        for (_v, agent) in write_buffer_reference.iter_mut() {
-            if agent.is_isolated() {
-                agent.set_isolation(false);
-            }
-        }
-    }
+    // fn lock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap) {
+    //     info!("Locking the city. Hour: {}", hr);
+    //     for (_v, agent) in write_buffer_reference.iter_mut() {
+    //         if !agent.is_essential_worker() {
+    //             agent.set_lockdown(true);
+    //         }
+    //     }
+    // }
+    //
+    // fn unlock_city(hr: i32, write_buffer_reference: &mut AgentLocationMap) {
+    //     info!("Unlocking city. Hour: {}", hr);
+    //     for (_v, agent) in write_buffer_reference.iter_mut() {
+    //         agent.set_lockdown(false);
+    //     }
+    // }
 }
 
 #[cfg(test)]

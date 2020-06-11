@@ -24,11 +24,11 @@ use crate::constants;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum State {
-    Susceptible {},
+    Susceptible,
     Exposed { at_hour: i32 },
     Infected { symptoms: bool, severity: InfectionSeverity },
-    Recovered {},
-    Deceased {},
+    Recovered,
+    Deceased,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -126,35 +126,32 @@ impl DiseaseStateMachine {
         }
     }
 
-    pub fn decease(&mut self, rng: &mut RandomWrapper, disease: &Disease) -> (i32, i32) {
+    pub fn decease_or_recover(&mut self, rng: &mut RandomWrapper, disease: &Disease) -> State {
         match self.state {
             State::Infected { symptoms: true, severity: InfectionSeverity::Severe {} } => {
                 if self.infection_day == disease.get_disease_last_day() {
                     if disease.to_be_deceased(rng) {
-                        self.state = State::Deceased {};
-                        return (1, 0);
+                        self.state = State::Deceased;
+                        return State::Deceased;
                     }
-                    self.state = State::Recovered {};
-                    return (0, 1);
+                    self.state = State::Recovered;
                 }
             }
             State::Infected { symptoms:true, severity: InfectionSeverity::Mild{} } => {
                 if self.infection_day == constants::MILD_INFECTED_LAST_DAY {
-                    self.state = State::Recovered {};
-                    return (0, 1);
+                    self.state = State::Recovered;
                 }
             }
             State::Infected { .. } => {
                 if self.infection_day == constants::ASYMPTOMATIC_LAST_DAY {
-                    self.state = State::Recovered {};
-                    return (0, 1);
+                    self.state = State::Recovered;
                 }
             }
             _ => {
                 panic!("Invalid state transition!")
             }
         }
-        (0, 0)
+        self.state
     }
 
     pub fn is_susceptible(&self) -> bool {
@@ -219,6 +216,12 @@ impl DiseaseStateMachine {
         }
     }
 
+    pub fn started_new_day(&mut self) { //TODO test
+        if self.is_infected() {
+            self.increment_infection_day()
+        }
+    }
+
     pub fn increment_infection_day(&mut self) {
         self.infection_day += 1;
     }
@@ -261,6 +264,17 @@ impl DiseaseStateMachine {
             State::Infected { symptoms: true, severity: InfectionSeverity::Severe } => { true }
             _ => { false }
         }
+    }
+}
+
+#[cfg(test)]
+pub mod mother {
+    use super::*;
+
+    pub fn deceased() -> DiseaseStateMachine {
+        let mut disease_state_machine = DiseaseStateMachine::new();
+        disease_state_machine.state = State::Deceased;
+        disease_state_machine
     }
 }
 
